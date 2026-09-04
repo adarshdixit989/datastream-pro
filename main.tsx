@@ -1,0 +1,38 @@
+import React, {useEffect, useMemo, useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {Activity, AlertTriangle, BarChart3, Database, Gauge, Radio, Server, TrendingUp, RefreshCw} from 'lucide-react';
+import {AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar} from 'recharts';
+import './styles.css';
+
+type Stats={event_type:string,count:number,sum:number,avg:number};
+type Event={id:number,event_type:string,source:string,value:number,created_at:string,published_to_kafka:boolean};
+type Anomaly={id:number,event_type:string,score:number,reason:string,detected_at:string};
+type Forecast={event_type:string,predicted_value:number,horizon_minutes:number,based_on_samples:number,created_at:string};
+
+const api=async(path:string)=>{const r=await fetch(path); if(!r.ok) throw new Error(`${r.status}`); return r.json()};
+const fmt=(n:number)=>new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(n);
+
+function App(){
+ const [stats,setStats]=useState<Stats[]>([]),[events,setEvents]=useState<Event[]>([]),[anomalies,setAnomalies]=useState<Anomaly[]>([]),[forecasts,setForecasts]=useState<Forecast[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');
+ const load=async()=>{try{setError('');const [s,e,a,f]=await Promise.all([api('/api/analytics/stats/'),api('/api/events/?page_size=40'),api('/api/analytics/anomalies/?page_size=8'),api('/api/analytics/forecast/?page_size=8')]);setStats(s.event_types||[]);setEvents(e.results||[]);setAnomalies(a.results||[]);setForecasts(f.results||[])}catch(e){setError('API unavailable — start the DataStream Pro stack.')}finally{setLoading(false)}};
+ useEffect(()=>{load();const id=setInterval(load,5000);return()=>clearInterval(id)},[]);
+ const total=stats.reduce((a,b)=>a+b.count,0),value=stats.reduce((a,b)=>a+b.sum,0),rate=Math.round(total/60);
+ const trend=useMemo(()=>events.slice(0,30).reverse().map((e,i)=>({i,events:1,value:e.value})),[events]);
+ const byType=stats.map(s=>({name:s.event_type,events:s.count}));
+ return <div className="app"><aside><div className="brand"><div className="logo"><Radio/></div><div><b>DataStream</b><span>PRO</span></div></div><nav><a className="active"><BarChart3/>Overview</a><a><Activity/>Event Stream</a><a><AlertTriangle/>Anomalies</a><a><TrendingUp/>Forecasts</a><a><Database/>Data Sources</a></nav><div className="sideStatus"><div className="liveDot"/>Pipeline online<div>Kafka · Redis · PostgreSQL</div></div></aside>
+ <main><header><div><p className="eyebrow">ENTERPRISE REAL-TIME ANALYTICS</p><h1>Operations Overview</h1><p className="muted">Streaming telemetry, ML signals and infrastructure health.</p></div><button onClick={load}><RefreshCw size={16}/> Refresh</button></header>
+ {error&&<div className="error">{error}</div>}
+ <section className="cards"><Card icon={<Activity/>} label="Total events" value={fmt(total)} note="Redis counters"/><Card icon={<Gauge/>} label="Events / min" value={fmt(rate)} note="Live estimate"/><Card icon={<AlertTriangle/>} label="ML anomalies" value={fmt(anomalies.length)} note="Recent flags" warn/><Card icon={<Database/>} label="Stream value" value={`$${fmt(value)}`} note="Aggregated"/></section>
+ <section className="grid2"><Panel title="Live Event Activity" meta="5s refresh"><div className="chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={trend}><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopOpacity={0.35}/><stop offset="100%" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="i" hide/><YAxis width={32}/><Tooltip/><Area type="monotone" dataKey="value" strokeWidth={2} fill="url(#g)"/></AreaChart></ResponsiveContainer></div></Panel>
+ <Panel title="Event Distribution" meta="All time"><div className="chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={byType}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="name"/><YAxis/><Tooltip/><Bar dataKey="events"/></BarChart></ResponsiveContainer></div></Panel></section>
+ <section className="grid2"><Panel title="ML Anomaly Feed" meta={`${anomalies.length} recent`}><div className="feed">{anomalies.length?anomalies.map(a=><div className="feedRow" key={a.id}><span className="severity">HIGH</span><div><b>{a.event_type}</b><small>{a.reason||'Isolation Forest signal'} · score {a.score.toFixed(3)}</small></div><time>{new Date(a.detected_at).toLocaleTimeString()}</time></div>):<div className="empty">No anomalies detected in the latest window.</div>}</div></Panel>
+ <Panel title="Latest Events" meta="Kafka stream"><div className="table">{events.slice(0,7).map(e=><div className="tr" key={e.id}><span>{e.event_type}</span><span>{e.source}</span><strong>{e.value.toLocaleString()}</strong><time>{new Date(e.created_at).toLocaleTimeString()}</time></div>)}</div></Panel></section>
+ <section className="grid2"><Panel title="Forecast Signals" meta="Next interval"><div className="forecastGrid">{forecasts.length?forecasts.slice(0,6).map(f=><div className="forecast" key={`${f.event_type}-${f.created_at}`}><div><b>{f.event_type}</b><small>{f.horizon_minutes} min horizon · {f.based_on_samples} samples</small></div><strong>{f.predicted_value.toFixed(1)}</strong></div>):<div className="empty">Forecasts appear after the consumer builds enough history.</div>}</div></Panel><Panel title="Pipeline Health" meta="Live"><div className="health"><Health name="Django API" ok/><Health name="Kafka stream" ok/><Health name="Redis counters" ok/><Health name="PostgreSQL" ok/></div></Panel></section>
+ <footer><span><Server size={14}/> System status: operational</span><span>{loading?'Syncing…':'Auto-refresh every 5 seconds'}</span></footer>
+ </main></div>
+}
+function Card({icon,label,value,note,warn=false}:{icon:React.ReactNode,label:string,value:string,note:string,warn?:boolean}){return <div className="card"><div className={'cardIcon '+(warn?'warn':'')}>{icon}</div><div><span>{label}</span><h2>{value}</h2><small>{note}</small></div></div>}
+function Health({name,ok}:{name:string,ok:boolean}){return <div className="healthRow"><span><i className={ok?'ok':''}></i>{name}</span><b>{ok?'Operational':'Degraded'}</b></div>}
+function Panel({title,meta,children}:{title:string,meta:string,children:React.ReactNode}){return <div className="panel"><div className="panelHead"><div><h3>{title}</h3><span>{meta}</span></div></div>{children}</div>}
+
+createRoot(document.getElementById('root')!).render(<App/>);

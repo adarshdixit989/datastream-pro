@@ -1,0 +1,93 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: datastream
+          POSTGRES_USER: datastream
+          POSTGRES_PASSWORD: datastream
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U datastream"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+
+    env:
+      DEBUG: "1"
+      SECRET_KEY: "ci-test-key"
+      POSTGRES_DB: datastream
+      POSTGRES_USER: datastream
+      POSTGRES_PASSWORD: datastream
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      KAFKA_BROKER: localhost:9092
+      KAFKA_TOPIC: raw-events
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (flake8)
+        run: |
+          pip install flake8
+          flake8 --max-line-length=120 --exclude=migrations events analytics datastream_pro
+
+      - name: Run migrations
+        run: python manage.py migrate --noinput
+
+      - name: Run tests
+        run: python manage.py test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # To enable pushing the image, add DOCKERHUB_USERNAME and
+      # DOCKERHUB_TOKEN as repository secrets, then uncomment the login
+      # step below and set push: true. Swap for GHCR (ghcr.io) if you'd
+      # rather not use Docker Hub.
+      # - name: Log in to Docker Hub
+      #   uses: docker/login-action@v3
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
+      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: datastream-pro:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
