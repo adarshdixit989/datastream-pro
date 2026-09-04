@@ -37,9 +37,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from kafka import KafkaConsumer
-        from kafka.errors import NoBrokersAvailable
-
         forecast_every = options["forecast_every"]
         events_since_forecast: dict[str, int] = {}
 
