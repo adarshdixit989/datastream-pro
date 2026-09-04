@@ -1,0 +1,98 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+    - 2181:2181
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+    - zookeeper
+    ports:
+    - 9092:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+  redis:
+    image: redis:7-alpine
+    ports:
+    - 6379:6379
+    volumes:
+    - redis_data:/data
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-datastream}
+      POSTGRES_USER: ${POSTGRES_USER:-datastream}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datastream}
+    ports:
+    - 5432:5432
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-datastream}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  web:
+    build: .
+    command: "sh -c \"python manage.py migrate --noinput &&\n       python manage.py\
+      \ collectstatic --noinput &&\n       gunicorn datastream_pro.wsgi:application\
+      \ --bind 0.0.0.0:8000 --workers 3\"\n"
+    volumes:
+    - .:/app
+    ports:
+    - 8000:8000
+    env_file:
+    - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz/')"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  consumer:
+    build: .
+    command: python manage.py consume_events
+    volumes:
+    - .:/app
+    env_file:
+    - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      redis:
+        condition: service_started
+      web:
+        condition: service_started
+    restart: on-failure
+  frontend:
+    build: ./frontend
+    ports:
+    - 3000:80
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgres_data: null
+  redis_data: null
