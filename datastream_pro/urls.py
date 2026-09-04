@@ -1,7 +1,11 @@
-from rest_framework.routers import DefaultRouter
-from .views import EventViewSet
+from django.contrib import admin
+from django.urls import include, path
 
-router = DefaultRouter()
-router.register(r"", EventViewSet, basename="event")
+from .health import health_check
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("health/", health_check, name="health"),
+    path("api/events/", include("events.urls")),
+    path("api/analytics/", include("analytics.urls")),
+]
