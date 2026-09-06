@@ -9,7 +9,8 @@ type Event={id:number,event_type:string,source:string,value:number,created_at:st
 type Anomaly={id:number,event_type:string,score:number,reason:string,detected_at:string};
 type Forecast={event_type:string,predicted_value:number,horizon_minutes:number,based_on_samples:number,created_at:string};
 
-const api=async(path:string)=>{const r=await fetch(path); if(!r.ok) throw new Error(`${r.status}`); return r.json()};
+const API_BASE=(import.meta.env.VITE_API_URL||'').replace(/\/$/,'');
+const api=async(path:string)=>{const r=await fetch(`${API_BASE}${path}`); if(!r.ok) throw new Error(`${r.status}`); return r.json()};
 const fmt=(n:number)=>new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1}).format(n);
 
 function App(){
